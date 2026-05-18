@@ -1,9 +1,11 @@
 const { spawn } = require("child_process");
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const { Readable } = require("stream");
-const ffmpeg = require("fluent-ffmpeg");
 const ffmpegStaticPath = require("ffmpeg-static");
 const ytdlp = require("yt-dlp-exec");
-const { sanitizeFileName } = require("../utils/file");
+const { createContentDisposition, sanitizeFileName } = require("../utils/file");
 const {
   detectPlatform,
   isSupportedPlatform,
@@ -15,10 +17,7 @@ const defaultUserAgent =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
 const ffmpegPath = process.env.FFMPEG_PATH || ffmpegStaticPath;
-
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
-}
+const tempDir = path.join(__dirname, "..", "temp");
 
 const baseYtdlpFlags = {
   noWarnings: true,
@@ -82,10 +81,10 @@ const normalizeYtdlpError = (error) => {
     return error;
   }
 
-  if (/private|login|sign in|cookies|not available|copyright|blocked|rate-limit|rate limit/i.test(message)) {
+  if (/unavailable|private|login|sign in|cookies|not available|copyright|blocked|rate-limit|rate limit/i.test(message)) {
     error.statusCode = 422;
     error.message =
-      "This media cannot be accessed publicly from the server. Try another public link or configure cookies.";
+      "This video is unavailable or cannot be accessed publicly from the server. Try another public link.";
     return error;
   }
 
@@ -168,35 +167,30 @@ const streamVideo = async ({ url, formatId, res, next }) => {
   const normalizedUrl = ensureUrl(url);
   const info = await getVideoInfo(normalizedUrl);
 
-  if (info.source === "tiktok-fallback") {
-    await streamTikTokFallbackVideo({
-      url: normalizedUrl,
-      formatId,
-      title: info.title,
+  const fileName = sanitizeFileName(info.title);
+
+  try {
+    const filePath =
+      info.source === "tiktok-fallback"
+        ? await downloadTikTokFallbackVideo({
+            url: normalizedUrl,
+            formatId,
+            title: info.title,
+          })
+        : await downloadYtdlpVideo({
+            url: normalizedUrl,
+            formatId,
+          });
+
+    await sendDownloadedFile({
+      filePath,
+      fileName: `${fileName}.mp4`,
       res,
       next,
     });
-    return;
+  } catch (error) {
+    next(error);
   }
-
-  const fileName = sanitizeFileName(info.title);
-  const format = formatId
-    ? `${formatId}+bestaudio[ext=m4a]/${formatId}/best[ext=mp4]/best`
-    : "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b";
-
-  const subprocess = ytdlp.exec(normalizedUrl, {
-    ...getYtdlpFlags(),
-    output: "-",
-    format,
-    noProgress: true,
-  });
-
-  pipeMp4Process({
-    subprocess,
-    res,
-    next,
-    fileName: `${fileName}.mp4`,
-  });
 };
 
 const getTikTokFallbackData = async (url) => {
@@ -275,111 +269,197 @@ const getTikTokFallbackInfo = async (url) => {
   };
 };
 
-const streamTikTokFallbackVideo = async ({ url, formatId, title, res, next }) => {
+const getTikTokMediaUrl = async ({ url, formatId }) => {
+  const data = await getTikTokFallbackData(url);
+  const mediaUrl =
+    formatId === "tiktok_sd"
+      ? data.play
+      : formatId === "tiktok_watermark"
+        ? data.wmplay
+        : data.hdplay || data.play || data.wmplay;
+
+  if (!mediaUrl) {
+    const error = new Error("No downloadable TikTok video format was found.");
+    error.statusCode = 422;
+    throw error;
+  }
+
+  return mediaUrl;
+};
+
+const createDownloadPath = async () => {
+  await fs.promises.mkdir(tempDir, { recursive: true });
+  return path.join(tempDir, `download-${Date.now()}-${crypto.randomUUID()}`);
+};
+
+const removeFile = async (filePath) => {
+  if (!filePath) {
+    return;
+  }
+
   try {
-    const data = await getTikTokFallbackData(url);
-    const mediaUrl =
-      formatId === "tiktok_sd"
-        ? data.play
-        : formatId === "tiktok_watermark"
-          ? data.wmplay
-          : data.hdplay || data.play || data.wmplay;
+    await fs.promises.unlink(filePath);
+  } catch (_error) {
+    // The temp file may already be gone if the process failed before creating it.
+  }
+};
 
-    if (!mediaUrl) {
-      const error = new Error("No downloadable TikTok video format was found.");
-      error.statusCode = 422;
-      throw error;
+const waitForProcess = (subprocess) =>
+  new Promise((resolve, reject) => {
+    subprocess.then(resolve).catch(reject);
+  });
+
+const findDownloadedFile = async (basePath) => {
+  const directory = path.dirname(basePath);
+  const filePrefix = path.basename(basePath);
+  const entries = await fs.promises.readdir(directory);
+  const candidates = entries
+    .filter((entry) => entry.startsWith(filePrefix) && !entry.endsWith(".part") && !entry.endsWith(".ytdl"))
+    .map((entry) => path.join(directory, entry));
+
+  for (const candidate of candidates) {
+    const stats = await fs.promises.stat(candidate);
+
+    if (stats.isFile() && stats.size > 0) {
+      return candidate;
     }
+  }
 
+  return null;
+};
+
+const assertPlayableOutput = async (filePath) => {
+  if (!filePath) {
+    const error = new Error("The download completed without producing a video file.");
+    error.statusCode = 502;
+    throw error;
+  }
+
+  const stats = await fs.promises.stat(filePath);
+
+  if (!stats.isFile() || stats.size < 1024) {
+    await removeFile(filePath);
+
+    const error = new Error("The downloaded file is empty or incomplete.");
+    error.statusCode = 502;
+    throw error;
+  }
+};
+
+const downloadYtdlpVideo = async ({ url, formatId }) => {
+  const basePath = await createDownloadPath();
+  const outputTemplate = `${basePath}.%(ext)s`;
+  const format = formatId
+    ? `${formatId}+bestaudio[ext=m4a]/${formatId}/bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best`
+    : "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4][vcodec^=avc1]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best";
+  let stderr = "";
+
+  try {
+    const subprocess = ytdlp.exec(url, {
+      ...getYtdlpFlags(),
+      output: outputTemplate,
+      format,
+      mergeOutputFormat: "mp4",
+      recodeVideo: "mp4",
+      noProgress: true,
+    });
+
+    subprocess.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    await waitForProcess(subprocess);
+
+    const filePath = await findDownloadedFile(basePath);
+    await assertPlayableOutput(filePath);
+
+    return filePath;
+  } catch (error) {
+    const files = await fs.promises.readdir(tempDir).catch(() => []);
+    await Promise.all(
+      files
+        .filter((file) => file.startsWith(path.basename(basePath)))
+        .map((file) => removeFile(path.join(tempDir, file)))
+    );
+
+    error.stderr = error.stderr || stderr;
+    throw normalizeYtdlpError(error);
+  }
+};
+
+const downloadTikTokFallbackVideo = async ({ url, formatId }) => {
+  const mediaUrl = await getTikTokMediaUrl({ url, formatId });
+  const basePath = await createDownloadPath();
+  const filePath = `${basePath}.mp4`;
+
+  try {
     const mediaResponse = await fetch(mediaUrl, {
       headers: { "user-agent": baseYtdlpFlags.userAgent },
       signal: AbortSignal.timeout(30000),
     });
 
-    if (!mediaResponse.ok || !mediaResponse.body) {
-      const error = new Error("Unable to stream this TikTok video right now.");
+    const contentType = mediaResponse.headers.get("content-type") || "";
+
+    if (
+      !mediaResponse.ok ||
+      !mediaResponse.body ||
+      (!contentType.includes("video") && !contentType.includes("octet-stream"))
+    ) {
+      const error = new Error("Unable to download this TikTok video right now.");
       error.statusCode = 502;
       throw error;
     }
 
-    res.setHeader("Content-Disposition", `attachment; filename="${sanitizeFileName(title)}.mp4"`);
-    res.setHeader("Content-Type", mediaResponse.headers.get("content-type") || "video/mp4");
-    Readable.fromWeb(mediaResponse.body).pipe(res);
+    await new Promise((resolve, reject) => {
+      const fileStream = fs.createWriteStream(filePath);
+
+      fileStream.on("finish", resolve);
+      fileStream.on("error", reject);
+      Readable.fromWeb(mediaResponse.body).on("error", reject).pipe(fileStream);
+    });
+
+    await assertPlayableOutput(filePath);
+    return filePath;
   } catch (error) {
-    next(error);
+    await removeFile(filePath);
+    throw error;
   }
 };
 
-const pipeMp4Process = ({ subprocess, res, next, fileName }) => {
-  let stderr = "";
-  let clientClosed = false;
-  let errorHandled = false;
+const sendDownloadedFile = async ({ filePath, fileName, res, next }) => {
+  const stats = await fs.promises.stat(filePath);
+  let cleanedUp = false;
 
-  const handleError = (error) => {
-    if (errorHandled || clientClosed || res.headersSent) {
+  const cleanup = async () => {
+    if (cleanedUp) {
       return;
     }
 
-    errorHandled = true;
-    next(normalizeYtdlpError(error));
+    cleanedUp = true;
+    await removeFile(filePath);
   };
 
-  if (typeof subprocess.catch === "function") {
-    subprocess.catch(handleError);
-  }
-
-  subprocess.stderr.on("data", (chunk) => {
-    stderr += chunk.toString();
-  });
-
-  subprocess.stdout.on("error", handleError);
-  subprocess.on("error", handleError);
-  subprocess.on("close", (code) => {
-    if (code === 0 || clientClosed || res.headersSent) {
-      return;
-    }
-
-    const error = new Error(stderr.trim().split("\n").pop() || "Unable to download this media");
-    error.statusCode = 502;
-    handleError(error);
-  });
-
-  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.setHeader("Content-Disposition", createContentDisposition(fileName));
   res.setHeader("Content-Type", "video/mp4");
-  res.on("error", () => {});
+  res.setHeader("Content-Length", stats.size);
 
-  const ffmpegCommand = ffmpeg(subprocess.stdout)
-    .outputOptions(["-c copy", "-movflags frag_keyframe+empty_moov"])
-    .format("mp4")
-    .on("error", (error) => {
-      if (clientClosed) {
-        return;
-      }
+  const fileStream = fs.createReadStream(filePath);
 
-      error.message = stderr.trim().split("\n").pop() || error.message;
-      handleError(error);
-    });
-
-  ffmpegCommand.pipe(res, { end: true });
-
-  res.on("close", () => {
-    clientClosed = true;
-    subprocess.stdout.unpipe(res);
-
-    try {
-      ffmpegCommand.kill("SIGTERM");
-    } catch (_error) {
-      // FFmpeg may already be closed after the client disconnects.
-    }
-
-    if (!subprocess.killed && subprocess.exitCode === null) {
-      try {
-        subprocess.kill("SIGTERM", { forceKillAfterTimeout: 1000 });
-      } catch (_error) {
-        // The child may already be gone after the client disconnects.
-      }
+  fileStream.on("error", async (error) => {
+    await cleanup();
+    if (error && !res.headersSent) {
+      next(error);
     }
   });
+
+  fileStream.on("close", cleanup);
+  res.on("finish", cleanup);
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      fileStream.destroy();
+    }
+  });
+  fileStream.pipe(res);
 };
 
 module.exports = {
