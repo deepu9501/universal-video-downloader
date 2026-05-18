@@ -28,6 +28,7 @@ const baseYtdlpFlags = {
 
 const tiktokCache = new Map();
 const tiktokCacheTtlMs = 5 * 60 * 1000;
+const supportedPlatforms = ["YouTube", "YouTube Shorts", "Instagram Reels", "Instagram", "Facebook", "TikTok", "Twitter/X"];
 
 const getYtdlpFlags = () => {
   const flags = { ...baseYtdlpFlags };
@@ -63,7 +64,7 @@ const ensureUrl = (url) => {
   }
 
   if (!isSupportedPlatform(normalizedUrl)) {
-    const error = new Error("Unsupported platform. Only YouTube, Instagram, Facebook, and TikTok links are allowed.");
+    const error = new Error("Unsupported platform. Only YouTube, Instagram, Facebook, TikTok, and Twitter/X links are allowed.");
     error.statusCode = 400;
     throw error;
   }
@@ -77,11 +78,18 @@ const normalizeYtdlpError = (error) => {
 
   if (/unsupported url|no suitable extractor/i.test(message)) {
     error.statusCode = 400;
-    error.message = "Unsupported link. Only YouTube, Instagram, Facebook, and TikTok links are allowed.";
+    error.message = "Unsupported link. Only YouTube, Instagram, Facebook, TikTok, and Twitter/X links are allowed.";
     return error;
   }
 
-  if (/unavailable|private|login|sign in|cookies|not available|copyright|blocked|rate-limit|rate limit/i.test(message)) {
+  if (/bot|login|sign in|cookies/i.test(message)) {
+    error.statusCode = 422;
+    error.message =
+      "This platform is asking for login verification. Configure YTDLP_COOKIES_PATH with exported browser cookies or try another public link.";
+    return error;
+  }
+
+  if (/unavailable|private|not available|copyright|blocked|rate-limit|rate limit/i.test(message)) {
     error.statusCode = 422;
     error.message =
       "This video is unavailable or cannot be accessed publicly from the server. Try another public link.";
@@ -185,6 +193,33 @@ const streamVideo = async ({ url, formatId, res, next }) => {
     await sendDownloadedFile({
       filePath,
       fileName: `${fileName}.mp4`,
+      res,
+      next,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const streamAudio = async ({ url, res, next }) => {
+  const normalizedUrl = ensureUrl(url);
+  const info = await getVideoInfo(normalizedUrl);
+  const fileName = sanitizeFileName(info.title);
+
+  try {
+    const filePath =
+      info.source === "tiktok-fallback"
+        ? await downloadTikTokFallbackAudio({
+            url: normalizedUrl,
+          })
+        : await downloadYtdlpAudio({
+            url: normalizedUrl,
+          });
+
+    await sendDownloadedFile({
+      filePath,
+      fileName: `${fileName}.mp3`,
+      contentType: "audio/mpeg",
       res,
       next,
     });
@@ -387,6 +422,68 @@ const downloadYtdlpVideo = async ({ url, formatId }) => {
   }
 };
 
+const downloadYtdlpAudio = async ({ url }) => {
+  const basePath = await createDownloadPath();
+  const outputTemplate = `${basePath}.%(ext)s`;
+  let stderr = "";
+
+  try {
+    const subprocess = ytdlp.exec(url, {
+      ...getYtdlpFlags(),
+      output: outputTemplate,
+      format: "bestaudio/best",
+      extractAudio: true,
+      audioFormat: "mp3",
+      audioQuality: 0,
+      noProgress: true,
+    });
+
+    subprocess.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    await waitForProcess(subprocess);
+
+    const filePath = await findDownloadedFile(basePath);
+    await assertPlayableOutput(filePath);
+
+    return filePath;
+  } catch (error) {
+    const files = await fs.promises.readdir(tempDir).catch(() => []);
+    await Promise.all(
+      files
+        .filter((file) => file.startsWith(path.basename(basePath)))
+        .map((file) => removeFile(path.join(tempDir, file)))
+    );
+
+    error.stderr = error.stderr || stderr;
+    throw normalizeYtdlpError(error);
+  }
+};
+
+const runFfmpeg = (args) =>
+  new Promise((resolve, reject) => {
+    const process = spawn(ffmpegPath || "ffmpeg", args, { windowsHide: true });
+    let stderr = "";
+
+    process.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    process.on("error", reject);
+    process.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      const error = new Error(stderr.trim().split("\n").pop() || "Unable to convert media");
+      error.stderr = stderr;
+      error.statusCode = 502;
+      reject(error);
+    });
+  });
+
 const downloadTikTokFallbackVideo = async ({ url, formatId }) => {
   const mediaUrl = await getTikTokMediaUrl({ url, formatId });
   const basePath = await createDownloadPath();
@@ -426,7 +523,23 @@ const downloadTikTokFallbackVideo = async ({ url, formatId }) => {
   }
 };
 
-const sendDownloadedFile = async ({ filePath, fileName, res, next }) => {
+const downloadTikTokFallbackAudio = async ({ url }) => {
+  const videoPath = await downloadTikTokFallbackVideo({ url });
+  const audioPath = `${await createDownloadPath()}.mp3`;
+
+  try {
+    await runFfmpeg(["-y", "-i", videoPath, "-vn", "-codec:a", "libmp3lame", "-q:a", "0", audioPath]);
+    await assertPlayableOutput(audioPath);
+    return audioPath;
+  } catch (error) {
+    await removeFile(audioPath);
+    throw normalizeYtdlpError(error);
+  } finally {
+    await removeFile(videoPath);
+  }
+};
+
+const sendDownloadedFile = async ({ filePath, fileName, contentType = "video/mp4", res, next }) => {
   const stats = await fs.promises.stat(filePath);
   let cleanedUp = false;
 
@@ -440,7 +553,7 @@ const sendDownloadedFile = async ({ filePath, fileName, res, next }) => {
   };
 
   res.setHeader("Content-Disposition", createContentDisposition(fileName));
-  res.setHeader("Content-Type", "video/mp4");
+  res.setHeader("Content-Type", contentType);
   res.setHeader("Content-Length", stats.size);
 
   const fileStream = fs.createReadStream(filePath);
@@ -465,5 +578,7 @@ const sendDownloadedFile = async ({ filePath, fileName, res, next }) => {
 module.exports = {
   getFfmpegStatus,
   getVideoInfo,
+  streamAudio,
   streamVideo,
+  supportedPlatforms,
 };

@@ -1,7 +1,7 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "Express API for downloading videos from YouTube, Instagram, Facebook, and TikTok.",
+  "description": "Express API for downloading videos from YouTube, Instagram, Facebook, TikTok, and Twitter/X.",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

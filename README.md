@@ -5,6 +5,7 @@ A modern universal video downloader platform supporting:
 - YouTube Videos
 - YouTube Shorts
 - Instagram Reels
+- Instagram Videos
 - Facebook Videos
 - TikTok Videos
 - Twitter/X Videos

@@ -1,5 +1,6 @@
 const {
   getVideoInfo,
+  streamAudio,
   streamVideo,
 } = require("../services/ytdlpService");
 
@@ -25,7 +26,20 @@ const downloadVideo = async (req, res, next) => {
   }
 };
 
+const downloadAudio = async (req, res, next) => {
+  try {
+    await streamAudio({
+      url: req.query.url,
+      res,
+      next,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
+  downloadAudio,
   downloadVideo,
   getInfo,
 };

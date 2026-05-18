@@ -60,6 +60,7 @@ const platformPills = [
   { label: "IG", color: "bg-fuchsia-500" },
   { label: "FB", color: "bg-blue-500" },
   { label: "TT", color: "bg-cyan-400" },
+  { label: "X", color: "bg-slate-700" },
 ];
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5000";
@@ -99,7 +100,7 @@ export default function Hero() {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        setMessage(data.message || "Only YouTube, Instagram, Facebook, and TikTok links are supported.");
+        setMessage(data.message || "Only YouTube, Instagram, Facebook, TikTok, and Twitter/X links are supported.");
         return;
       }
 
@@ -137,14 +138,14 @@ export default function Hero() {
         >
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.16)]">
             <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_14px_rgba(103,232,249,0.9)]" />
-            YouTube, Instagram, Facebook, and TikTok only
+            YouTube, Instagram, Facebook, TikTok, and Twitter/X only
           </div>
 
           <h1 className="max-w-4xl text-5xl font-black tracking-tight text-white sm:text-6xl lg:text-7xl">
-            Download videos from the four platforms you actually use.
+            Download videos from the five platforms you actually use.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300 sm:text-xl">
-            Paste a YouTube video or Shorts link, an Instagram Reel, a Facebook video, or a TikTok URL and start a clean video download.
+            Paste a YouTube video or Shorts link, an Instagram Reel, a Facebook video, a TikTok URL, or a Twitter/X post and start a clean video download.
           </p>
 
           <form
@@ -157,7 +158,7 @@ export default function Hero() {
                 <input
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
-                  placeholder="Paste YouTube, Instagram, Facebook, or TikTok URL"
+                  placeholder="Paste YouTube, Instagram, Facebook, TikTok, or Twitter/X URL"
                   className="h-full w-full bg-transparent text-base text-white outline-none placeholder:text-slate-500"
                 />
               </label>
@@ -180,7 +181,7 @@ export default function Hero() {
           </form>
 
           <div className="mt-6 flex flex-wrap gap-3 text-sm text-slate-300">
-            {["Four platforms", "No app install", "Video only"].map((item) => (
+            {["Five platforms", "No app install", "Video and audio APIs"].map((item) => (
               <span
                 key={item}
                 className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-4 py-2"
@@ -301,7 +302,7 @@ export default function Hero() {
                         <Layers3 className="h-4 w-4 text-cyan-200" />
                         Media stack
                       </span>
-                      <span className="text-xs font-semibold text-slate-400">4 sources</span>
+                      <span className="text-xs font-semibold text-slate-400">5 sources</span>
                     </div>
                     <div className="grid gap-3">
                       {["Metadata", "Thumbnail", "Download stream"].map((item, index) => (

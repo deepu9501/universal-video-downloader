@@ -29,6 +29,7 @@ const detectPlatform = (url = "", extractor = "") => {
     if (hostMatches(hostname, ["instagram.com"])) return "Instagram";
     if (hostMatches(hostname, ["facebook.com", "fb.watch"])) return "Facebook";
     if (hostMatches(hostname, ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"])) return "TikTok";
+    if (hostMatches(hostname, ["x.com", "twitter.com"])) return "Twitter/X";
   } catch (_error) {
     // Fall back to extractor metadata below.
   }
@@ -39,13 +40,14 @@ const detectPlatform = (url = "", extractor = "") => {
   if (key.includes("instagram")) return "Instagram";
   if (key.includes("facebook")) return "Facebook";
   if (key.includes("tiktok")) return "TikTok";
+  if (key.includes("twitter") || key.includes("x.com")) return "Twitter/X";
 
   return "Unknown";
 };
 
 const isSupportedPlatform = (url) => {
   const platform = detectPlatform(url);
-  return ["YouTube", "YouTube Shorts", "Instagram Reels", "Instagram", "Facebook", "TikTok"].includes(platform);
+  return ["YouTube", "YouTube Shorts", "Instagram Reels", "Instagram", "Facebook", "TikTok", "Twitter/X"].includes(platform);
 };
 
 module.exports = {
