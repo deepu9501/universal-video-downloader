@@ -63,7 +63,9 @@ const platformPills = [
   { label: "X", color: "bg-slate-700" },
 ];
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5000";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+const apiUrl = (path, query) => `${API_BASE_URL}${path}${query ? `?${query}` : ""}`;
 
 export default function Hero() {
   const [url, setUrl] = useState("");
@@ -96,7 +98,7 @@ export default function Hero() {
 
     try {
       const infoQuery = new URLSearchParams({ url: videoUrl }).toString();
-      const response = await fetch(`${API_BASE_URL}/api/info?${infoQuery}`);
+      const response = await fetch(apiUrl("/api/info", infoQuery));
       const data = await response.json();
 
       if (!response.ok || !data.success) {
@@ -109,7 +111,7 @@ export default function Hero() {
         url: videoUrl,
         title: data.title || "video-download",
       }).toString();
-      window.location.href = `${API_BASE_URL}/api/download?${downloadQuery}`;
+      window.location.href = apiUrl("/api/download", downloadQuery);
     } catch (_error) {
       setMessage("Unable to reach the download server. Please start the backend.");
     } finally {

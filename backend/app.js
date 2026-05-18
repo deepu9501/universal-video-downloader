@@ -1,3 +1,6 @@
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env"), quiet: true });
+
 const express = require("express");
 const cors = require("cors");
 const videoRoutes = require("./routes/videoRoutes");
@@ -43,13 +46,17 @@ app.use((_req, res) => {
 });
 
 app.use((error, _req, res, _next) => {
-  console.error(error);
+  const statusCode = error.statusCode || 500;
+
+  if (statusCode >= 500) {
+    console.error(error);
+  }
 
   if (res.headersSent) {
     return;
   }
 
-  res.status(error.statusCode || 500).json({
+  res.status(statusCode).json({
     success: false,
     message: error.message || "Something went wrong while processing the request",
   });
