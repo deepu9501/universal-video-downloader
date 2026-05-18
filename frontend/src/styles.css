@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #05060a;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #05060a;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.blob {
+  position: absolute;
+  z-index: -10;
+  border-radius: 9999px;
+  filter: blur(56px);
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.blob-one {
+  top: 12%;
+  left: 4%;
+  width: min(24rem, 70vw);
+  height: min(24rem, 70vw);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.65), rgba(37, 99, 235, 0.28));
+}
+
+.blob-two {
+  right: 0;
+  bottom: 16%;
+  width: min(28rem, 72vw);
+  height: min(28rem, 72vw);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.45), rgba(99, 102, 241, 0.18));
+}
+
+.button-shine {
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%) skewX(-16deg);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.24),
+    transparent
+  );
+  animation: shine 3.8s ease-in-out infinite;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  background-size: 240% 100%;
+  animation: shimmer 2.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+@keyframes shine {
+  0%,
+  45% {
+    transform: translateX(-120%) skewX(-16deg);
+  }
+  70%,
+  100% {
+    transform: translateX(120%) skewX(-16deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "vedio-downloader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Full-stack video and shorts downloader.",
+  "scripts": {
+    "dev": "concurrently -n frontend,backend -c cyan,magenta \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\"",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "start": "npm --prefix backend start",
+    "start:frontend": "npm --prefix frontend run dev",
+    "start:backend": "npm --prefix backend start",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
