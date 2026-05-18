@@ -87,7 +87,7 @@ export default function Hero() {
     const videoUrl = url.trim();
 
     if (!videoUrl) {
-      setMessage("Paste a YouTube, Instagram, Facebook, or TikTok link first.");
+      setMessage("Paste a YouTube, Instagram, Facebook, TikTok, or Twitter/X link first.");
       return;
     }
 
@@ -95,8 +95,8 @@ export default function Hero() {
     setMessage("Checking link...");
 
     try {
-      const query = new URLSearchParams({ url: videoUrl }).toString();
-      const response = await fetch(`${API_BASE_URL}/api/info?${query}`);
+      const infoQuery = new URLSearchParams({ url: videoUrl }).toString();
+      const response = await fetch(`${API_BASE_URL}/api/info?${infoQuery}`);
       const data = await response.json();
 
       if (!response.ok || !data.success) {
@@ -105,7 +105,11 @@ export default function Hero() {
       }
 
       setMessage(`Starting download: ${data.title}`);
-      window.location.href = `${API_BASE_URL}/api/download?${query}`;
+      const downloadQuery = new URLSearchParams({
+        url: videoUrl,
+        title: data.title || "video-download",
+      }).toString();
+      window.location.href = `${API_BASE_URL}/api/download?${downloadQuery}`;
     } catch (_error) {
       setMessage("Unable to reach the download server. Please start the backend.");
     } finally {

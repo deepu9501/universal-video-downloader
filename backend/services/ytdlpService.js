@@ -171,32 +171,35 @@ const getVideoInfo = async (url) => {
   };
 };
 
-const streamVideo = async ({ url, formatId, res, next }) => {
+const streamVideo = async ({ url, formatId, downloadTitle, res, next }) => {
   const normalizedUrl = ensureUrl(url);
-  const info = await getVideoInfo(normalizedUrl);
-
-  const fileName = sanitizeFileName(info.title);
+  const fileName = sanitizeFileName(downloadTitle || "video-download");
 
   try {
-    const filePath =
-      info.source === "tiktok-fallback"
-        ? await downloadTikTokFallbackVideo({
-            url: normalizedUrl,
-            formatId,
-            title: info.title,
-          })
-        : await downloadYtdlpVideo({
-            url: normalizedUrl,
-            formatId,
-          });
+    if (isTikTokUrl(normalizedUrl) && process.env.TIKTOK_FALLBACK_DISABLED !== "true") {
+      await streamTikTokFallbackVideo({
+        url: normalizedUrl,
+        formatId,
+        fileName: `${fileName}.mp4`,
+        res,
+        next,
+      });
+      return;
+    }
 
-    await sendDownloadedFile({
-      filePath,
+    await streamYtdlpVideo({
+      url: normalizedUrl,
+      formatId,
       fileName: `${fileName}.mp4`,
       res,
       next,
     });
   } catch (error) {
+    if (res.headersSent) {
+      res.destroy(error);
+      return;
+    }
+
     next(error);
   }
 };
@@ -381,6 +384,69 @@ const assertPlayableOutput = async (filePath) => {
   }
 };
 
+const prepareStreamingDownload = ({ res, fileName, contentType = "video/mp4", contentLength }) => {
+  res.setHeader("Content-Disposition", createContentDisposition(fileName));
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  if (contentLength) {
+    res.setHeader("Content-Length", contentLength);
+  }
+
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+};
+
+const streamYtdlpVideo = async ({ url, formatId, fileName, res, next }) => {
+  const format = formatId
+    ? `${formatId}/best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=mp4]/best[vcodec!=none][acodec!=none]`
+    : "best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=mp4]/best[vcodec!=none][acodec!=none]";
+
+  try {
+    const mediaUrl = await ytdlp(url, {
+      ...getYtdlpFlags(),
+      getUrl: true,
+      format,
+    });
+    const directUrl = String(mediaUrl).trim().split("\n").filter(Boolean)[0];
+
+    if (!directUrl) {
+      const error = new Error("No direct downloadable media stream was found.");
+      error.statusCode = 422;
+      throw error;
+    }
+
+    const mediaResponse = await fetch(directUrl, {
+      headers: { "user-agent": baseYtdlpFlags.userAgent },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!mediaResponse.ok || !mediaResponse.body) {
+      const error = new Error("Unable to open the direct media stream.");
+      error.statusCode = 502;
+      throw error;
+    }
+
+    prepareStreamingDownload({
+      res,
+      fileName,
+      contentType: mediaResponse.headers.get("content-type") || "video/mp4",
+      contentLength: mediaResponse.headers.get("content-length"),
+    });
+
+    Readable.fromWeb(mediaResponse.body).on("error", (error) => res.destroy(error)).pipe(res);
+  } catch (error) {
+    if (res.headersSent) {
+      res.destroy(error);
+      return;
+    }
+
+    next(normalizeYtdlpError(error));
+  }
+};
+
 const downloadYtdlpVideo = async ({ url, formatId }) => {
   const basePath = await createDownloadPath();
   const outputTemplate = `${basePath}.%(ext)s`;
@@ -520,6 +586,44 @@ const downloadTikTokFallbackVideo = async ({ url, formatId }) => {
   } catch (error) {
     await removeFile(filePath);
     throw error;
+  }
+};
+
+const streamTikTokFallbackVideo = async ({ url, formatId, fileName, res, next }) => {
+  try {
+    const mediaUrl = await getTikTokMediaUrl({ url, formatId });
+    const mediaResponse = await fetch(mediaUrl, {
+      headers: { "user-agent": baseYtdlpFlags.userAgent },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    const contentType = mediaResponse.headers.get("content-type") || "";
+
+    if (
+      !mediaResponse.ok ||
+      !mediaResponse.body ||
+      (!contentType.includes("video") && !contentType.includes("octet-stream"))
+    ) {
+      const error = new Error("Unable to download this TikTok video right now.");
+      error.statusCode = 502;
+      throw error;
+    }
+
+    prepareStreamingDownload({
+      res,
+      fileName,
+      contentType: contentType.includes("video") ? contentType : "video/mp4",
+      contentLength: mediaResponse.headers.get("content-length"),
+    });
+
+    Readable.fromWeb(mediaResponse.body).on("error", (error) => res.destroy(error)).pipe(res);
+  } catch (error) {
+    if (res.headersSent) {
+      res.destroy(error);
+      return;
+    }
+
+    next(error);
   }
 };
 

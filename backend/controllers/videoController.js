@@ -18,6 +18,7 @@ const downloadVideo = async (req, res, next) => {
     await streamVideo({
       url: req.query.url,
       formatId: req.query.format,
+      downloadTitle: req.query.title,
       res,
       next,
     });
