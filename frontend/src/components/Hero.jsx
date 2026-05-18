@@ -63,7 +63,10 @@ const platformPills = [
   { label: "X", color: "bg-slate-700" },
 ];
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  "https://all-in-one-video-downloader-u7f9.onrender.com"
+).replace(/\/$/, "");
 
 const apiUrl = (path, query) => `${API_BASE_URL}${path}${query ? `?${query}` : ""}`;
 
