@@ -63,7 +63,11 @@ const platformPills = [
   { label: "X", color: "bg-slate-700" },
 ];
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const PRODUCTION_API_BASE_URL = "https://all-in-one-video-downloader-u7f9.onrender.com";
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "" : PRODUCTION_API_BASE_URL)
+).replace(/\/$/, "");
 
 const apiUrl = (path, query) => `${API_BASE_URL}${path}${query ? `?${query}` : ""}`;
 
@@ -113,7 +117,7 @@ export default function Hero() {
       }).toString();
       window.location.href = apiUrl("/api/download", downloadQuery);
     } catch (_error) {
-      setMessage("Unable to reach the download server. Please start the backend.");
+      setMessage("Unable to reach the download server. Please check the backend deployment.");
     } finally {
       setLoading(false);
     }
