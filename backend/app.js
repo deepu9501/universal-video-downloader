@@ -8,6 +8,23 @@ const { getFfmpegStatus, supportedPlatforms } = require("./services/ytdlpService
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const defaultAllowedOrigins = [
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+  "https://universal-video-downloader-nine.vercel.app",
+];
+const configuredAllowedOrigins = [
+  process.env.CLIENT_ORIGIN,
+  process.env.CLIENT_ORIGINS,
+]
+  .filter(Boolean)
+  .flatMap((origin) => origin.split(","))
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([
+  ...defaultAllowedOrigins,
+  ...configuredAllowedOrigins,
+]);
 
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection:", reason);
@@ -19,7 +36,14 @@ process.on("uncaughtException", (error) => {
 
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || "*",
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has("*") || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, false);
+    },
     methods: ["GET", "POST", "OPTIONS"],
   })
 );
